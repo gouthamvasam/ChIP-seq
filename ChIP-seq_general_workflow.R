@@ -1,18 +1,7 @@
 #!/usr/bin/env Rscript
 
 # Import necessary libraries
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
-
-BiocManager::install("rGADEM")
-BiocManager::install("motifStack")
-BiocManager::install("Biostrings")
-BiocManager::install("DiffBind")
-BiocManager::install("ChIPseeker")
-BiocManager::install("TxDb.Hsapiens.UCSC.hg19.knownGene")
-BiocManager::install("ggplot2")
-BiocManager::install("ComplexHeatmap")
-
+library(BiocManager)
 library(rGADEM)
 library(motifStack)
 library(Biostrings)
@@ -22,19 +11,28 @@ library(TxDb.Hsapiens.UCSC.hg19.knownGene)
 library(ggplot2)
 library(ComplexHeatmap)
 
+# Ensure that the necessary Bioconductor packages are installed
+packages <- c("rGADEM", "motifStack", "Biostrings", "DiffBind", "ChIPseeker", 
+              "TxDb.Hsapiens.UCSC.hg19.knownGene", "ggplot2", "ComplexHeatmap")
+for (pkg in packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg)
+  }
+}
+
 # Quality Control of Raw Reads
 run_fastqc <- function(fastq_files, output_dir) {
   fastqc_cmd <- paste("fastqc", paste(fastq_files, collapse=" "), "-o", output_dir)
   system(fastqc_cmd)
 }
 
-# Read Alignment
+# Read Alignment with Bowtie2
 run_bowtie2 <- function(index_base, read_files, output_sam) {
   bowtie2_cmd <- paste("bowtie2 -x", index_base, "-1", read_files[1], "-2", read_files[2], "-S", output_sam)
   system(bowtie2_cmd)
 }
 
-# Peak Calling
+# Peak Calling with MACS2
 run_macs2 <- function(treatment_bam, control_bam=NULL, output_dir, genome_size="hs", is_pe=FALSE) {
   macs2_cmd <- paste("macs2 callpeak -t", treatment_bam, "-f", ifelse(is_pe, "BAMPE", "BAM"), "-g", genome_size, "--outdir", output_dir)
   if (!is.null(control_bam)) {
@@ -43,20 +41,20 @@ run_macs2 <- function(treatment_bam, control_bam=NULL, output_dir, genome_size="
   system(macs2_cmd)
 }
 
-# Annotation
+# Annotation of Peaks
 annotate_peaks <- function(peak_file) {
   peaks <- readPeakFile(peak_file)
   annotated_peaks <- annotatePeak(peaks, tssRegion=c(-3000, 3000), TxDb=TxDb.Hsapiens.UCSC.hg19.knownGene)
   return(annotated_peaks)
 }
 
-# Motif Analysis
+# Motif Analysis with GADEM
 run_gadem <- function(peak_sequences) {
   gadem <- GADEM(peak_sequences)
   return(gadem)
 }
 
-# Differential Binding Analysis
+# Differential Binding Analysis with DiffBind
 run_diffbind <- function(sampleSheet) {
   dba <- dba(sampleSheet = sampleSheet)
   dba <- dba.count(dba)
@@ -66,44 +64,57 @@ run_diffbind <- function(sampleSheet) {
   return(results)
 }
 
-# MA Plot
+# MA Plot for Differential Binding Analysis
 plot_ma <- function(results) {
-  ggplot(results, aes(x = AveExpr, y = log2FoldChange)) +
-    geom_point(aes(color = pvalue < 0.05)) +
+  # Check if 'AveExpr' column exists; if not, calculate it or use an alternative
+  if (!"AveExpr" %in% colnames(results)) {
+    # Placeholder: AveExpr needs to be calculated or set to a default column
+    results$AveExpr <- rowMeans(results[, c("ColumnName1", "ColumnName2")])  # Adjust with actual column names
+  }
+  
+  ggplot_object <- ggplot(results, aes(x = AveExpr, y = log2FoldChange)) +
+    geom_point(aes(color = FDR < 0.05)) +
     scale_color_manual(values = c("black", "red")) +
     theme_minimal() +
     labs(title = "MA Plot", x = "Average Expression", y = "Log2 Fold Change") +
     geom_hline(yintercept = 0, linetype = "dashed", color = "red")
+  print(ggplot_object)  # Print the plot
 }
 
-# Volcano Plot
+# Volcano Plot for Differential Binding Analysis
 plot_volcano <- function(results) {
-  ggplot(results, aes(x = log2FoldChange, y = -log10(pvalue))) +
-    geom_point(aes(color = pvalue < 0.05)) +
+  ggplot_object <- ggplot(results, aes(x = log2FoldChange, y = -log10(FDR))) +
+    geom_point(aes(color = FDR < 0.05)) +
     scale_color_manual(values = c("black", "red")) +
     theme_minimal() +
-    labs(title = "Volcano Plot", x = "Log2 Fold Change", y = "-Log10 p-value") +
+    labs(title = "Volcano Plot", x = "Log2 Fold Change", y = "-Log10 FDR") +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "red") +
-    geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "blue")
+    geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "blue") +
+    theme(legend.position = "none")  # Hide the legend
+  print(ggplot_object)  # Print the plot
 }
 
-# Heatmap
-plot_heatmap <- function(normalized_data, de_results) {
-  top_genes <- de_results[order(de_results$pvalue), ][1:50, ]$gene
+# Heatmap for Differential Binding Analysis
+plot_heatmap <- function(normalized_data, results) {
+  # Assuming 'results' is a DataFrame with a 'gene' column and 'normalized_data' is a matrix with rownames as genes
+  # Select top differentially expressed genes for the heatmap
+  top_genes <- head(order(results$FDR), 50)  # Get the top 50 genes by FDR
   data_subset <- normalized_data[top_genes, ]
-  heatmap <- Heatmap(data_subset, name = "Binding Intensity", show_row_names = FALSE, show_column_names = TRUE)
-  draw(heatmap, heatmap_legend_side = "bot")
+  
+  # Create the heatmap
+  heatmap_object <- Heatmap(data_subset, name = "Binding Intensity", show_row_names = TRUE, show_column_names = TRUE)
+  draw(heatmap_object)  # Draw the heatmap
 }
 
 # Main function to run the workflow
 run_chipseq_workflow <- function() {
   # Example usage:
-  fastq_files <- c("sample1.fastq", "sample2.fastq")
+  fastq_files <- c("sample1.fastq", "sample2.fastq")  # List your FASTQ files here
   output_dir <- "fastqc_results"
   run_fastqc(fastq_files, output_dir)
   
   index_base <- "path/to/genome_index"
-  read_files <- c("sample1_R1.fastq", "sample1_R2.fastq")
+  read_files <- c("sample1_R1.fastq", "sample1_R2.fastq")  # Replace with your read files
   output_sam <- "aligned_reads.sam"
   run_bowtie2(index_base, read_files, output_sam)
   
@@ -115,16 +126,16 @@ run_chipseq_workflow <- function() {
   peak_file <- "macs2_output/peaks.narrowPeak"
   annotated_peaks <- annotate_peaks(peak_file)
   
+  # Assuming the peak sequences are extracted and stored in 'peak_sequences'
   peak_sequences <- getSeq(BSgenome.Hsapiens.UCSC.hg19, names(annotated_peaks))
   gadem <- run_gadem(peak_sequences)
   
   sampleSheet <- "samples.csv"
   results <- run_diffbind(sampleSheet)
   
+  # Assuming 'results' and 'normalized_data' are already defined
   plot_ma(results)
   plot_volcano(results)
-  
-  normalized_data <- read.csv("normalized_expression.csv", row.names = 1)
   plot_heatmap(normalized_data, results)
 }
 
