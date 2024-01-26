@@ -1,7 +1,28 @@
 #!/usr/bin/env Rscript
 
-# Import necessary libraries
-library(BiocManager)
+# Load necessary libraries and install them if they are not already installed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+required_packages <- c("ggplot2", "cowplot")
+bioconductor_packages <- c("rGADEM", "motifStack", "Biostrings", "DiffBind", "ChIPseeker", 
+                           "TxDb.Hsapiens.UCSC.hg19.knownGene", "ComplexHeatmap")
+
+# Install CRAN packages if they are not installed
+for (pkg in required_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+  }
+}
+
+# Install Bioconductor packages if they are not installed
+for (pkg in bioconductor_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    BiocManager::install(pkg)
+  }
+}
+
+# Load necessary libraries
 library(rGADEM)
 library(motifStack)
 library(Biostrings)
@@ -10,15 +31,6 @@ library(ChIPseeker)
 library(TxDb.Hsapiens.UCSC.hg19.knownGene)
 library(ggplot2)
 library(ComplexHeatmap)
-
-# Ensure that the necessary Bioconductor packages are installed
-packages <- c("rGADEM", "motifStack", "Biostrings", "DiffBind", "ChIPseeker", 
-              "TxDb.Hsapiens.UCSC.hg19.knownGene", "ggplot2", "ComplexHeatmap")
-for (pkg in packages) {
-  if (!requireNamespace(pkg, quietly = TRUE)) {
-    BiocManager::install(pkg)
-  }
-}
 
 # Quality Control of Raw Reads
 run_fastqc <- function(fastq_files, output_dir) {
